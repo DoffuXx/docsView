@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# Serve any folder of Markdown as a searchable site (MkDocs + Material, Gruvbox).
+# Usage: markdownlive [-folder=DIR] [start|stop|restart|status|build|logs|check|pdf|new] [-d|--detach] [-p|--port N] [--open] [--lan] [--out DIR]
+set -euo pipefail
+export DISABLE_MKDOCS_2_WARNING=true NO_MKDOCS_2_WARNING=true
+
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+REPO_CONF="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)/config"
+if [ -n "${MARKDOWNLIVE_CONF:-}" ]; then
+  CONF="$MARKDOWNLIVE_CONF"
+elif [ -f "$REPO_CONF/mkdocs.base.yml" ]; then
+  CONF="$REPO_CONF"
+else
+  CONF="$HOME/.config/markdownlive"
+fi
+PORT="${MARKDOWNLIVE_PORT:-}"
+extra=()
+action=start detach=0 folder="" open=0 lan=0 outdir=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    start|stop|restart|status|build|logs|check|pdf|new) action="$1" ;;
+    -d|--detach) detach=1 ;;
+    -p|--port) PORT="$2"; shift ;;
+    --orphans) extra+=(--orphans) ;;
+    --open) open=1 ;;
+    --lan) lan=1 ;;
+    --out) outdir="$2"; shift ;;
+    -folder=*|--folder=*) folder="${1#*=}" ;;
+    -folder|--folder|-f) folder="$2"; shift ;;
+    -h|--help) sed -n 2,3p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [ -z "$folder" ]; then
+  if [ -d docs ]; then folder=docs; else folder=.; fi
+fi
+if [ "$action" = new ]; then
+  [ -n "$folder" ] || { echo "usage: markdownlive new -folder=DIR" >&2; exit 2; }
+  [ -e "$folder/index.md" ] && { echo "$folder/index.md already exists; leaving it alone" >&2; exit 1; }
+  mkdir -p "$folder" && cp "$CONF/templates/index.md" "$folder/index.md"
+  echo "created $folder/index.md  ->  markdownlive -folder=$folder start -d --open"; exit 0
+fi
+if [ "$action" = start ] || [ "$action" = restart ]; then
+  [ -d "$folder" ] || { echo "folder not found: $folder" >&2; exit 1; }
+fi
+DOCS="$(cd "$folder" 2>/dev/null && pwd -P || true)"
+CACHE="$HOME/.cache/markdownlive/$(basename "${DOCS:-none}")-$(printf %s "${DOCS:-none}" | md5sum | cut -c1-8)"
+PORTS="$HOME/.cache/markdownlive/ports.json"
+if [ -z "$PORT" ]; then
+  PORT="$(python3 -I - "$PORTS" "$DOCS" "$action" <<'PY'
+import json, socket, sys
+f, d, act = sys.argv[1:4]
+try: m = json.load(open(f))
+except Exception: m = {}
+if d in m: print(m[d]); sys.exit()
+if act not in ("start", "restart"):
+    print(8010); sys.exit()
+used = set(m.values())
+def free(p):
+    with socket.socket() as s: return s.connect_ex(("127.0.0.1", p)) != 0
+p = next(p for p in range(8010, 8100) if p not in used and free(p))
+if act in ("start", "restart"):
+    m[d] = p; json.dump(m, open(f, "w"))
+print(p)
+PY
+)"
+fi
+BIND=127.0.0.1; [ "$lan" = 1 ] && BIND=0.0.0.0
+URL="http://127.0.0.1:${PORT}/"
+mkdir -p "$CACHE"
+
+listener_pid() { ss -ltnp 2>/dev/null | awk -v p=":${PORT}" '$4 ~ p"$" {print}' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true; }
+
+do_status() {
+  local pid; pid="$(listener_pid)"
+  if [ -n "$pid" ]; then echo "running: $URL (pid $pid)"; else echo "not running on port $PORT"; return 1; fi
+}
+
+do_stop() {
+  local pid; pid="$(listener_pid)"
+  if [ -z "$pid" ]; then echo "nothing listening on port $PORT"; return 0; fi
+  if ! tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q mkdocs; then
+    echo "port $PORT is used by pid $pid, which is not mkdocs; leaving it alone" >&2; return 1
+  fi
+  local pgid; pgid="$(ps -o pgid= -p "$pid" | tr -d ' ')"
+  kill -- "-$pgid" 2>/dev/null || kill "$pid"
+  echo "stopped (pid $pid)"
+}
+
+do_start() {
+  if [ -n "$(listener_pid)" ]; then echo "already running: $URL"; return 0; fi
+  export MARKDOWNLIVE_GEN="$CACHE/generated"
+  python3 -I "$CONF/gen_config.py" "$CONF/mkdocs.base.yml" "$DOCS" "$CACHE/mkdocs.yml" "$CACHE/site"
+  cmd=(uvx --from mkdocs --with mkdocs-material --with mkdocs-redirects
+       --with mkdocs-git-revision-date-localized-plugin --with mkdocs-glightbox --with mkdocs-print-site-plugin
+       mkdocs serve -f "$CACHE/mkdocs.yml" -a "${BIND}:${PORT}")
+  cd /tmp
+  [ "$open" = 1 ] && ( for _ in $(seq 1 90); do curl -s -o /dev/null "$URL" && { cmd.exe /c start "" "$URL" >/dev/null 2>&1; break; }; sleep 1; done ) &
+  if [ "$lan" = 1 ]; then echo "LAN: http://$(hostname -I | awk '{print $1}'):${PORT}/ (WSL IP; needs a Windows port-forward from other devices)"; fi
+  if [ "$detach" = 1 ]; then
+    setsid nohup "${cmd[@]}" > "$CACHE/serve.log" 2>&1 &
+    for _ in $(seq 1 90); do
+      curl -s -o /dev/null "$URL" && { echo "running: $URL  (log: $CACHE/serve.log)"; return 0; }
+      sleep 1
+    done
+    echo "did not come up in 90s; see $CACHE/serve.log" >&2; return 1
+  fi
+  echo "serving $DOCS at $URL (Ctrl+C to stop)"
+  exec "${cmd[@]}"
+}
+
+do_build() {
+  local out="${outdir:-$DOCS/site}"
+  python3 -I "$CONF/gen_config.py" "$CONF/mkdocs.base.yml" "$DOCS" "$CACHE/mkdocs.yml" "$out"
+  MARKDOWNLIVE_GEN="$CACHE/generated" uvx --from mkdocs --with mkdocs-material --with mkdocs-redirects \
+    --with mkdocs-git-revision-date-localized-plugin --with mkdocs-glightbox --with mkdocs-print-site-plugin \
+    mkdocs build -f "$CACHE/mkdocs.yml" -q
+  echo "built static site: $out"
+}
+
+do_logs() { [ -f "$CACHE/serve.log" ] && tail -n 40 -f "$CACHE/serve.log" || echo "no log for $DOCS" >&2; }
+
+do_check() { python3 -I "$CONF/check.py" "$DOCS" "$@"; }
+
+do_pdf() {
+  local out="${outdir:-$DOCS/$(basename "$DOCS").pdf}" tmp; tmp="$CACHE/pdf-site"
+  outdir="$tmp" do_build >/dev/null
+  google-chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=15000 \
+    --no-pdf-header-footer --print-to-pdf="$out" "file://$tmp/print_page/index.html" >/dev/null 2>&1
+  if [ -s "$out" ]; then
+    echo "pdf: $out"
+  else
+    echo "pdf export failed" >&2
+    return 1
+  fi
+}
+
+case "$action" in
+  check) do_check "${extra[@]}" ;;
+  pdf) do_pdf ;;
+  build) do_build ;;
+  logs) do_logs ;;
+  start) do_start ;;
+  stop) do_stop ;;
+  restart) do_stop || true; sleep 1; do_start ;;
+  status) do_status ;;
+esac

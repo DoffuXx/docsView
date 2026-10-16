@@ -1,0 +1,106 @@
+site_name: __SITE_NAME__
+docs_dir: __DOCS_DIR__
+site_dir: __SITE_DIR__
+use_directory_urls: true
+exclude_docs: |
+  *Zone.Identifier
+  .~lock*
+validation:
+  nav:
+    omitted_files: ignore
+  links:
+    not_found: ignore
+    anchors: ignore
+    absolute_links: ignore
+    unrecognized_links: ignore
+watch:
+  - __GROUPS__
+hooks:
+  - __HOOKS__
+theme:
+  name: material
+  custom_dir: __OVERRIDES__
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-sunny, name: Gruvbox light }
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-night, name: Gruvbox dark }
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.path
+    - navigation.footer
+    - navigation.top
+    - navigation.tracking
+    - navigation.prune
+    - navigation.sections
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+    - content.footnote.tooltips
+    - content.tabs.link
+plugins:
+  - search
+  - tags
+__REDIRECTS__  - git-revision-date-localized:
+      type: date
+      enable_creation_date: true
+      fallback_to_build_date: true
+  - glightbox
+  - print-site:
+      add_to_navigation: false
+      print_page_title: Print / save as PDF
+markdown_extensions:
+  - tables
+  - footnotes
+  - def_list
+  - attr_list
+  - md_in_html
+  - toc: { permalink: true }
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.snippets:
+      check_paths: false
+  - pymdownx.smartsymbols
+  - abbr
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.blocks.caption
+  - pymdownx.betterem
+  - pymdownx.magiclink
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed: { alternate_style: true }
+  - pymdownx.tasklist: { custom_checkbox: true }
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+extra_javascript:
+  - javascripts/sidebar-organizer.js
+  - javascripts/reader-tools.js
+  - javascripts/markdown-tools.js
+  - https://cdnjs.cloudflare.com/ajax/libs/tablesort/5.3.0/tablesort.min.js
+  - javascripts/tablesort.js
+  - javascripts/mathjax.js
+  - https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js

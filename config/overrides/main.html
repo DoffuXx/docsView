@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block extrahead %}
+  <link rel="stylesheet" href="{{ 'assets/gruvbox.css' | url }}">
+  {% if page and page.file %}<meta name="markdown-source-file" content="{{ page.file.src_uri }}">{% endif %}
+{% endblock %}
